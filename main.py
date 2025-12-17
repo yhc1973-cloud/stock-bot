@@ -1,85 +1,81 @@
 import requests
 from bs4 import BeautifulSoup
 import os
-import json
 
 # --- 설정 구간 ---
 TOKEN = "8313563094:AAFiKFIwtpxdL7NhwmjhzQIqFItAxCeWY8U"
 CHAT_ID = "868396866"
-TARGET_URL = "https://www.cnbc.com/2025/12/15/stock-market-today-live-updates.html"
+# CNBC라는 단어를 직접 사용하지 않기 위해 변수명도 변경
+SOURCE_URL = "https://www.cnbc.com/2025/12/15/stock-market-today-live-updates.html"
 LAST_ID_FILE = "last_post_id.txt"
 
-def translate_and_summarize(text):
-    """구글 번역을 이용해 번역 후, 핵심 문장 위주로 다듬습니다."""
+def translate_and_refine(text):
+    """번역 후 특정 브랜드명 삭제 및 문체 가공"""
     try:
         url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q={text}"
-        res = requests.get(url)
+        res = requests.get(url, timeout=10)
         full_text = "".join([sentence[0] for sentence in res.json()[0]])
         
-        # 가독성을 위해 마침표 기준으로 줄바꿈 추가 및 불필요한 공백 제거
-        summarized = full_text.replace(". ", ".\n- ").strip()
-        return summarized
+        # CNBC 및 관련 단어를 중립적인 표현으로 치환
+        full_text = full_text.replace("CNBC", "현지 매체").replace("씨엔비씨", "현지 소식통")
+        
+        # 가독성을 위한 줄바꿈 정리
+        return full_text.replace(". ", ".\n- ").strip()
     except:
         return text
 
-def send_formatted_telegram(title, body):
-    # 번역 및 정리
-    ko_title = translate_and_summarize(title).split('\n')[0] # 제목은 한 줄만
-    ko_body = translate_and_summarize(body)
+def send_private_report(title, body):
+    """출처 언급 없이 깔끔한 브리핑 포맷으로 전송"""
+    ko_title = translate_and_refine(title).split('\n')[0]
+    ko_body = translate_and_refine(body)
 
-    # 읽기 쉬운 포맷 구성
-    message = f"📌 **CNBC 실시간 마켓 브리핑**\n"
-    message += f"━━━━━━━━━━━━━━━\n\n"
-    message += f"🚩 **주제: {ko_title}**\n\n"
-    message += f"📝 **핵심 요약:**\n- {ko_body}\n\n"
-    message += f"🔗 [CNBC 원문에서 확인]({TARGET_URL})"
+    # 텔레그램 메시지 구성 (CNBC 언급 및 링크 완전 제거)
+    msg = f"⚡️ **[실시간] 미 증시 핵심 시황 브리핑**\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"📌 **헤드라인: {ko_title}**\n\n"
+    msg += f"📝 **상세 분석:**\n- {ko_body}\n\n"
+    msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"✅ 시장 분석 에이전트 업데이트 완료"
 
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, data={
         "chat_id": CHAT_ID, 
-        "text": message, 
+        "text": msg, 
         "parse_mode": "Markdown",
         "disable_web_page_preview": True
     })
 
-def run_tracker():
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res = requests.get(TARGET_URL, headers=headers)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    
-    posts = soup.select('.LiveBlog-post')
-    if not posts: return
-
-    # 마지막 전송 ID 확인
-    last_id = ""
-    if os.path.exists(LAST_ID_FILE):
-        with open(LAST_ID_FILE, "r") as f:
-            last_id = f.read().strip()
-
-    new_posts = []
-    for post in posts:
-        pid = post.get('id')
-        if pid == last_id: break
-        
-        title = post.select_one('.LiveBlog-postTitle')
-        content = post.select_one('.LiveBlog-postContent')
-        
-        if pid and (title or content):
-            new_posts.append({
-                'id': pid,
-                'title': title.get_text(strip=True) if title else "실시간 속보",
-                'body': content.get_text(strip=True) if content else ""
-            })
-
-    # 최신순 -> 과거순으로 정렬되어 있으므로 역순으로 발송
-    new_posts.reverse()
-    for p in new_posts:
-        send_formatted_telegram(p['title'], p['body'])
-        last_id = p['id']
-
-    # 마지막 ID 업데이트
-    with open(LAST_ID_FILE, "w") as f:
-        f.write(last_id)
-
 if __name__ == "__main__":
-    run_tracker()
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        res = requests.get(SOURCE_URL, headers=headers)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # 실시간 업데이트 포스트 추출
+        post = soup.select_one('.LiveBlog-post')
+        
+        if post:
+            pid = post.get('id')
+            last_id = ""
+            
+            # 마지막 전송 기록 확인
+            if os.path.exists(LAST_ID_FILE):
+                with open(LAST_ID_FILE, "r") as f:
+                    last_id = f.read().strip()
+            
+            # 새 글이 올라왔을 때만 실행
+            if pid != last_id:
+                title_elem = post.select_one('.LiveBlog-postTitle')
+                content_elem = post.select_one('.LiveBlog-postContent')
+                
+                title = title_elem.get_text(strip=True) if title_elem else "시장 주요 소식"
+                content = content_elem.get_text(strip=True) if content_elem else ""
+                
+                if content:
+                    send_private_report(title, content)
+                    
+                    # 상태 업데이트 (ID 저장)
+                    with open(LAST_ID_FILE, "w") as f:
+                        f.write(pid)
+    except Exception as e:
+        print(f"오류 발생: {e}")
