@@ -1,11 +1,11 @@
-name: CNBC Search Tracker
+name: Daily Market Report
 on:
   schedule:
-    - cron: '*/10 * * * *'
-  workflow_dispatch:
+    - cron: '0 22 * * *'  # 한국 시간 매일 오전 7시 (UTC 22:00)
+  workflow_dispatch:      # 수동 실행 버튼
 
 jobs:
-  run-tracker:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,18 +14,16 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install Dependencies
-        run: pip install requests beautifulsoup4
-      - name: Run Script
+      - name: Install Lib
+        run: pip install requests beautifulsoup4 yfinance
+      - name: Run Tracker
         run: |
-          # 파일이 없으면 빈 파일 생성 (에러 방지)
           touch last_post_id.txt
           python main.py
       - name: Commit Status
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          # 파일이 실제로 변경되었을 때만 푸시
           if [ -f last_post_id.txt ]; then
             git add last_post_id.txt
             git commit -m "Update last post ID" || exit 0
