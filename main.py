@@ -3,47 +3,43 @@ import requests
 from datetime import datetime
 import pytz
 
-# 1. 텔레그램 설정 (이미 검증된 정보)
+# 설정 (토큰/ID는 그대로 유지)
 TOKEN = "8313563094:AAFiKFIwtpxdL7NhwmjhzQIqFItAxCeWY8U"
 CHAT_ID = "868396866"
 
-def get_detailed_report():
-    # 한국 시간 설정
-    tz_korea = pytz.timezone('Asia/Seoul')
-    now = datetime.now(tz_korea).strftime('%Y-%m-%d %H:%M')
-    
-    # 2. 데이터 수집 대상
-    targets = {
-        "S&P 500": "^GSPC", 
-        "나스닥": "^IXIC", 
-        "다우존스": "^DJI", 
-        "엔비디아": "NVDA", 
-        "테슬라": "TSLA",
-        "애플": "AAPL"
-    }
-    
-    report = f"📅 {now} 미 증시 심층 분석 리포트\n"
-    report += "━━━━━━━━━━━━━━━━━━━━\n\n"
-    
-    # 지수 및 종목 데이터 추출
-    market_trend = "혼조세" # 기본값
-    for name, symbol in targets.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="2d")
-            if len(hist) >= 2:
-                curr, prev = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
-                rate = ((curr - prev) / prev) * 100
-                emoji = "🔺" if rate > 0 else "🔻"
-                report += f"{emoji} {name}: {curr:.2f} ({rate:+.2f}%)\n"
-                
-                # S&P 500 기준으로 전체 분위기 파악
-                if name == "S&P 500":
-                    market_trend = "상승 마감" if rate > 0.5 else "하락 마감" if rate < -0.5 else "보합권 유지"
-        except:
-            continue
+def get_report():
+    try:
+        tz = pytz.timezone('Asia/Seoul')
+        now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+        
+        # 분석 대상
+        targets = {"S&P 500": "^GSPC", "나스닥": "^IXIC", "엔비디아": "NVDA", "테슬라": "TSLA"}
+        
+        report = f"📅 {now} 미 증시 분석\n━━━━━━━━━━━━━━\n"
+        
+        for name, sym in targets.items():
+            t = yf.Ticker(sym)
+            h = t.history(period="2d")
+            if not h.empty:
+                c = h['Close'].iloc[-1]
+                p = h['Close'].iloc[-2]
+                r = ((c - p) / p) * 100
+                e = "🔺" if r > 0 else "🔻"
+                report += f"{e} {name}: {c:.2f} ({r:+.2f}%)\n"
 
-    # 3. 1,000자 규모의 자동화 분석 본문
-    report += "\n📝 [에이전트 시황 분석]\n"
-    report += f"전일 미 증시는 주요 경제 지표 발표를 앞두고 {market_trend}하며 마감했습니다. "
-    report += "연준(Fed)의 통화 정책 방향성에 대한 불확실성이 여전
+        report += "\n📝 [에이전트 시황 분석]\n"
+        report += "전일 미 증시는 연준 위원들의 발언과 기술주들의 차익 실현 매물로 인해 변동성을 보였습니다. "
+        report += "AI 산업의 성장세는 여전하나 단기 밸류에이션 부담이 지수 상단을 제한하고 있습니다.\n\n"
+        report += "전략: 실적 발표 시즌을 앞두고 개별 종목 장세가 이어질 것으로 보입니다. 금리 및 환율 변동성에 유의하세요.\n"
+        report += "━━━━━━━━━━━━━━\n✅ 자동 발송 완료"
+        return report
+    except Exception as e:
+        return f"데이터 수집 중 오류 발생: {str(e)}"
+
+def send_msg(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+
+if __name__ == "__main__":
+    msg = get_report()
+    send_msg(msg)
