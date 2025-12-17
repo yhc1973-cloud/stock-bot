@@ -34,7 +34,6 @@ def get_market_data(symbol):
 def get_latest_news():
     news_items = []
     try:
-        # 인베스팅닷컴 RSS
         feed = feedparser.parse("https://www.investing.com/rss/news_25.rss")
         for entry in feed.entries[:5]:
             news_items.append(f"• {entry.title}")
@@ -46,7 +45,6 @@ def generate_report():
     tz = pytz.timezone('Asia/Seoul')
     now = datetime.now(tz).strftime('%m/%d')
     
-    # 데이터 수집
     symbols = {
         "나스닥": "^IXIC", "S&P500": "^GSPC", "필라반": "^SOX",
         "VIX": "^VIX", "미국채10년": "^TNX",
@@ -63,7 +61,6 @@ def generate_report():
 
     headlines = get_latest_news()
 
-    # 리포트 작성
     report = f"🏢 {now} 미 증시 심층 전략 리포트\n"
     report += "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     report += "📊 [핵심 매크로 지표]\n"
@@ -90,4 +87,13 @@ def generate_report():
         
     return report
 
-def send_
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+
+if __name__ == "__main__":
+    if is_market_open():
+        content = generate_report()
+        send_telegram(content)
+    else:
+        print("Market is closed.")
