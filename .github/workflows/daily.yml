@@ -1,14 +1,14 @@
 name: CNBC Search Tracker
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 10분마다 실행
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
   run-tracker:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 파일 수정을 위해 필수
+      contents: write
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -17,11 +17,15 @@ jobs:
       - name: Install Dependencies
         run: pip install requests beautifulsoup4
       - name: Run Script
-        run: python main.py
+        run: |
+          # 파일이 없으면 빈 파일 생성 (에러 방지)
+          touch last_post_id.txt
+          python main.py
       - name: Commit Status
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
+          # 파일이 실제로 변경되었을 때만 푸시
           if [ -f last_post_id.txt ]; then
             git add last_post_id.txt
             git commit -m "Update last post ID" || exit 0
