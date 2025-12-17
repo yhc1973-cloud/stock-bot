@@ -1,99 +1,85 @@
-import yfinance as yf
 import requests
-from datetime import datetime
-import pytz
-import feedparser
+from bs4 import BeautifulSoup
+import os
+import json
 
-# 1. 설정
+# --- 설정 구간 ---
 TOKEN = "8313563094:AAFiKFIwtpxdL7NhwmjhzQIqFItAxCeWY8U"
 CHAT_ID = "868396866"
+TARGET_URL = "https://www.cnbc.com/2025/12/15/stock-market-today-live-updates.html"
+LAST_ID_FILE = "last_post_id.txt"
 
-def is_market_open():
+def translate_and_summarize(text):
+    """구글 번역을 이용해 번역 후, 핵심 문장 위주로 다듬습니다."""
     try:
-        spy = yf.Ticker("^GSPC")
-        hist = spy.history(period="1d")
-        if hist.empty or hist['Volume'].iloc[-1] == 0:
-            return False
-        return True
-    except:
-        return False
-
-def get_market_data(symbol):
-    try:
-        t = yf.Ticker(symbol)
-        h = t.history(period="2d")
-        if not h.empty and len(h) >= 2:
-            c = h['Close'].iloc[-1]
-            p = h['Close'].iloc[-2]
-            r = ((c - p) / p) * 100
-            return c, r
-    except:
-        pass
-    return None, None
-
-def get_latest_news():
-    news_items = []
-    try:
-        feed = feedparser.parse("https://www.investing.com/rss/news_25.rss")
-        for entry in feed.entries[:5]:
-            news_items.append(f"• {entry.title}")
-    except:
-        news_items = ["• 실시간 뉴스 데이터를 가져오지 못했습니다."]
-    return "\n".join(news_items)
-
-def generate_report():
-    tz = pytz.timezone('Asia/Seoul')
-    now = datetime.now(tz).strftime('%m/%d')
-    
-    symbols = {
-        "나스닥": "^IXIC", "S&P500": "^GSPC", "필라반": "^SOX",
-        "VIX": "^VIX", "미국채10년": "^TNX",
-        "엔비디아": "NVDA", "테슬라": "TSLA", "애플": "AAPL"
-    }
-    
-    res = {}
-    for name, sym in symbols.items():
-        c, r = get_market_data(sym)
-        if c is not None:
-            res[name] = f"{c:.2f} ({r:+.2f}%)"
-        else:
-            res[name] = "데이터 수집 불가"
-
-    headlines = get_latest_news()
-
-    report = f"🏢 {now} 미 증시 심층 전략 리포트\n"
-    report += "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    report += "📊 [핵심 매크로 지표]\n"
-    report += f"● VIX(공포지수): {res.get('VIX')}\n"
-    report += f"● 미 10년물 국채금리: {res.get('미국채10년')}\n"
-    report += f"● 필라델피아 반도체: {res.get('필라반')}\n\n"
-
-    report += "🌐 [실시간 주요 뉴스 헤드라인]\n"
-    report += headlines + "\n\n"
-
-    report += "▶️ [시장 심층 분석]\n"
-    report += "금일 증시는 주요 경제 지표 발표 이후 국채 금리의 향방에 따라 기술주들이 민감한 변동성을 보였습니다. 특히 AI 인프라 정책에 대한 기대감이 하방 경직성을 확보해주고 있으며, 주요 대형주들을 중심으로 한 견조한 매수세가 확인되었습니다.\n\n"
-    
-    report += "🚩 [주요 종목 모니터링]\n"
-    report += f"- 테슬라: {res.get('테슬라')}\n"
-    report += f"- 엔비디아: {res.get('엔비디아')}\n"
-    report += f"- 애플: {res.get('애플')}\n\n"
-
-    report += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    report += "✅ AI 분석 리포트 발송 완료"
-
-    if len(report) > 4000:
-        report = report[:3990] + "..."
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q={text}"
+        res = requests.get(url)
+        full_text = "".join([sentence[0] for sentence in res.json()[0]])
         
-    return report
+        # 가독성을 위해 마침표 기준으로 줄바꿈 추가 및 불필요한 공백 제거
+        summarized = full_text.replace(". ", ".\n- ").strip()
+        return summarized
+    except:
+        return text
 
-def send_telegram(text):
+def send_formatted_telegram(title, body):
+    # 번역 및 정리
+    ko_title = translate_and_summarize(title).split('\n')[0] # 제목은 한 줄만
+    ko_body = translate_and_summarize(body)
+
+    # 읽기 쉬운 포맷 구성
+    message = f"📌 **CNBC 실시간 마켓 브리핑**\n"
+    message += f"━━━━━━━━━━━━━━━\n\n"
+    message += f"🚩 **주제: {ko_title}**\n\n"
+    message += f"📝 **핵심 요약:**\n- {ko_body}\n\n"
+    message += f"🔗 [CNBC 원문에서 확인]({TARGET_URL})"
+
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    requests.post(url, data={
+        "chat_id": CHAT_ID, 
+        "text": message, 
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    })
+
+def run_tracker():
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res = requests.get(TARGET_URL, headers=headers)
+    soup = BeautifulSoup(res.text, 'html.parser')
+    
+    posts = soup.select('.LiveBlog-post')
+    if not posts: return
+
+    # 마지막 전송 ID 확인
+    last_id = ""
+    if os.path.exists(LAST_ID_FILE):
+        with open(LAST_ID_FILE, "r") as f:
+            last_id = f.read().strip()
+
+    new_posts = []
+    for post in posts:
+        pid = post.get('id')
+        if pid == last_id: break
+        
+        title = post.select_one('.LiveBlog-postTitle')
+        content = post.select_one('.LiveBlog-postContent')
+        
+        if pid and (title or content):
+            new_posts.append({
+                'id': pid,
+                'title': title.get_text(strip=True) if title else "실시간 속보",
+                'body': content.get_text(strip=True) if content else ""
+            })
+
+    # 최신순 -> 과거순으로 정렬되어 있으므로 역순으로 발송
+    new_posts.reverse()
+    for p in new_posts:
+        send_formatted_telegram(p['title'], p['body'])
+        last_id = p['id']
+
+    # 마지막 ID 업데이트
+    with open(LAST_ID_FILE, "w") as f:
+        f.write(last_id)
 
 if __name__ == "__main__":
-    if is_market_open():
-        content = generate_report()
-        send_telegram(content)
-    else:
-        print("Market is closed.")
+    run_tracker()
