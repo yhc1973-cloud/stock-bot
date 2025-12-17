@@ -20,7 +20,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install yfinance requests pytz
+          pip install yfinance requests pytz feedparser
 
       - name: Execute Python Script
         run: python main.py
