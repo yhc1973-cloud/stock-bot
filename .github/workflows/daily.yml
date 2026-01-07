@@ -1,18 +1,23 @@
-name: 10Min Market Tracker
+name: Daily Stock Bot
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 10분마다 실행
-  workflow_dispatch:        # 수동 실행 버튼
+    - cron: '0 22 * * *' # 한국 시간 오전 7시 실행
+  workflow_dispatch: # 수동 실행 버튼 활성화
 
 jobs:
-  run-tracker:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: Python 설정
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      - name: Install Dependencies
-        run: pip install requests beautifulsoup4
-      - name: Run Script
+          python-version: '3.10'
+      - name: 필수 도구 설치
+        run: pip install yfinance google-generativeai requests
+      - name: 봇 실행
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python main.py
