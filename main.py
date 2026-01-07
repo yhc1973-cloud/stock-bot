@@ -1,103 +1,56 @@
+import google.generativeai as genai
 import requests
-from bs4 import BeautifulSoup
-import re
-import sys
+import os
+import xml.etree.ElementTree as ET
 
-# --- 설정 구간 ---
-TOKEN = "8313563094:AAFiKFIwtpxdL7NhwmjhzQIqFItAxCeWY8U"
-CHAT_ID = "868396866"
-
-def get_latest_link():
-    """구글 검색에서 CNBC 라이브 링크를 더 정밀하게 추출합니다."""
-    # 검색어에 'today'를 넣어 최신성을 높입니다.
-    search_url = "https://www.google.com/search?q=cnbc+stock+market+today+live+updates&tbm=nws"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-    }
+def get_market_news():
+    # 미국 증시 요약(Stock Market Summary) 전문 뉴스를 검색합니다.
+    # 'US Stock Market Closing' 키워드를 사용하여 장 마감 분석 뉴스를 타겟팅합니다.
+    query = "US Stock Market Morning Briefing or Closing Summary"
+    url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=en-US&gl=US&ceid=US:en"
     
-    try:
-        res = requests.get(search_url, headers=headers, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # 모든 링크를 뒤져서 cnbc 라이브 업데이트 패턴을 찾습니다.
-        links = soup.find_all('a', href=True)
-        for a in links:
-            href = a['href']
-            # CNBC 기사이고 live-updates가 포함된 주소인지 확인
-            if 'cnbc.com' in href and 'live-updates' in href:
-                # 구글 리다이렉트 주소(/url?q=...) 처리
-                match = re.search(r'(https?://www\.cnbc\.com/[^&]+)', href)
-                if match:
-                    return match.group(1)
-                elif href.startswith('http'):
-                    return href
-        
-        print("검색 결과에서 적절한 CNBC 링크를 찾지 못했습니다.")
-    except Exception as e:
-        print(f"구글 검색 중 오류 발생: {e}")
-    return None
-
-def translate_and_refine(text):
-    try:
-        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q={text}"
-        res = requests.get(url, timeout=10)
-        full_text = "".join([s[0] for s in res.json()[0]])
-        
-        # 출처 언급 지우기
-        forbidden = ["CNBC", "씨엔비씨", "Live Updates", "실시간 업데이트"]
-        for word in forbidden:
-            full_text = full_text.replace(word, "현지 시황팀")
-        return full_text.replace(". ", ".\n- ").strip()
-    except:
-        return text
-
-def send_telegram(title, body):
-    ko_title = translate_and_refine(title).split('\n')[0]
-    ko_body = translate_and_refine(body)
-
-    msg = f"⚡️ **[실시간] 미 증시 긴급 시황 브리핑**\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
-    msg += f"🚩 **주요 헤드라인: {ko_title}**\n\n"
-    msg += f"📝 **상세 분석:**\n- {ko_body}\n\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"✅ 시스템 자동 업데이트 완료"
-
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    response = requests.post(url, data={
-        "chat_id": CHAT_ID, 
-        "text": msg, 
-        "parse_mode": "Markdown"
-    })
+    response = requests.get(url)
+    root = ET.fromstring(response.content)
     
-    if response.status_code == 200:
-        print("텔레그램 전송 성공!")
-    else:
-        print(f"텔레그램 전송 실패: {response.text}")
+    news_items = []
+    for item in root.findall('.//item')[:15]: # 더 정확한 분석을 위해 15개 헤드라인 수집
+        news_items.append(item.find('title').text)
+    
+    return "\n".join(news_items)
+
+def main():
+    # 1. 미국 증시 전문 뉴스 수집
+    market_headlines = get_market_news()
+    
+    # 2. Gemini AI 분석 (전문가 모드)
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = f"""
+    너는 베테랑 월스트리트 애널리스트야. 아래의 최신 미국 증시 헤드라인들을 바탕으로 '오늘의 미국 시장'을 정리해줘.
+    
+    데이터:
+    {market_headlines}
+    
+    다음 내용을 반드시 포함해서 한국어로 작성해:
+    1. 시장 전체 분위기: (예: 하락 마감, 혼조세, 랠리 등)
+    2. 지수 움직임의 핵심 원인: (금리, 지표 발표, 지정학적 이슈 등 주요 원인 2가지)
+    3. 주요 종목 및 섹터 특이사항: (빅테크, 반도체 등 눈에 띄는 종목 언급)
+    4. 투자자에게 주는 짧은 시사점: (오늘 장의 의미 한줄 요약)
+
+    최대한 객관적이고 전문적인 톤으로 작성해줘.
+    """
+    
+    response = model.generate_content(prompt)
+    
+    # 3. 텔레그램 전송
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("CHAT_ID")
+    # 메시지가 너무 길면 텔레그램에서 잘릴 수 있으므로 깔끔하게 제목 추가
+    final_report = f"🇺🇸 [미국 주식시장 분석 보고서]\n\n{response.text}"
+    
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": final_report})
 
 if __name__ == "__main__":
-    target_url = get_latest_link()
-    
-    if target_url:
-        print(f"최신 뉴스 접속 주소: {target_url}")
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(target_url, headers=headers)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # CNBC 라이브 블로그의 포스트 구조 확인
-        post = soup.select_one('.LiveBlog-post')
-        
-        if post:
-            title_el = post.select_one('.LiveBlog-postTitle')
-            content_el = post.select_one('.LiveBlog-postContent')
-            
-            title = title_el.get_text(strip=True) if title_el else "시장 주요 소식"
-            content = content_el.get_text(strip=True) if content_el else ""
-            
-            if content:
-                send_telegram(title, content)
-            else:
-                print("기사 본문 내용을 추출하지 못했습니다.")
-        else:
-            print("해당 페이지에서 라이브 포스트 형식을 찾지 못했습니다.")
-    else:
-        print("대상 URL이 없어 실행을 중단합니다.")
+    main()
